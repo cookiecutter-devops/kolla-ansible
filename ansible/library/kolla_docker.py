@@ -195,12 +195,26 @@ options:
     required: False
     default: False
     type: bool
-  client_timeout:
+  network_mode:
     description:
-      - Docker client timeout in seconds
+      - Set the network mode for the container
+      - Can be 'host', 'bridge', 'none', or a custom network name
+      - If not specified, defaults to 'host' for container creation, and
+        network mode is not compared for existing containers (preserving
+        backward compatibility with deployments that do not set it)
     required: False
-    default: 120
-    type: int
+    type: str
+    default: None
+  ports:
+    description:
+      - List of port mappings for the container
+      - Each entry is 'host_port:container_port' or 'host_port:container_port/protocol'
+      - Only effective when network_mode is not 'host'
+      - If not specified, no port bindings are applied and ports are not
+        compared for existing containers
+    required: False
+    type: list
+    default: None
 author: Sam Yaple
 '''
 
@@ -335,7 +349,9 @@ class DockerWorker(object):
                 self.compare_environment(container_info) or
                 self.compare_container_state(container_info) or
                 self.compare_dimensions(container_info) or
-                self.compare_command(container_info)
+                self.compare_command(container_info) or
+                self.compare_network_mode(container_info) or
+                self.compare_ports(container_info)
         )
 
     def compare_ipc_mode(self, container_info):
@@ -532,6 +548,34 @@ class DockerWorker(object):
                     new_args != container_info['Args']):
                 return True
 
+
+    def compare_network_mode(self, container_info):
+        new_network_mode = self.params.get('network_mode')
+        # Only compare network_mode when it is explicitly specified.
+        if new_network_mode is None:
+            return False
+        current_network_mode = container_info['HostConfig'].get('NetworkMode')
+        if not current_network_mode:
+            current_network_mode = None
+        if new_network_mode != current_network_mode:
+            return True
+        return False
+
+    def compare_ports(self, container_info):
+        new_ports = self.params.get('ports')
+        if not new_ports:
+            return False
+        network_mode = self.params.get('network_mode')
+        if network_mode is None or network_mode == 'host':
+            return False
+        new_bindings = self.generate_port_bindings(new_ports)
+        current_bindings = container_info['HostConfig'].get('PortBindings')
+        if not current_bindings:
+            current_bindings = dict()
+        if new_bindings != current_bindings:
+            return True
+        return False
+
     def parse_image(self):
         full_image = self.params.get('image')
 
@@ -669,9 +713,52 @@ class DockerWorker(object):
                                                    hard=hard))
         return ulimits_opt
 
+    def generate_port_bindings(self, ports):
+        port_bindings = {}
+        for port in ports:
+            if not port or ':' not in port:
+                continue
+            parts = port.split(':')
+            if len(parts) == 2:
+                host_port, container_port = parts
+                protocol = 'tcp'
+            elif len(parts) == 3:
+                host_port, container_port, protocol = parts
+            else:
+                continue
+            # Handle protocol in container_port if present (e.g., "8080/tcp")
+            if '/' in container_port:
+                container_port, protocol = container_port.split('/', 1)
+            key = '{}/{}'.format(container_port, protocol)
+            if key not in port_bindings:
+                port_bindings[key] = []
+            port_bindings[key].append({
+                'HostIp': '0.0.0.0',
+                'HostPort': str(host_port)
+            })
+        return port_bindings
+
+    def generate_exposed_ports(self, ports):
+        exposed_ports = {}
+        for port in ports:
+            if not port or ':' not in port:
+                continue
+            parts = port.split(':')
+            if len(parts) >= 2:
+                container_port = parts[1]
+                protocol = 'tcp'
+                if '/' in container_port:
+                    container_port, protocol = container_port.split('/', 1)
+                key = '{}/{}'.format(container_port, protocol)
+                exposed_ports[key] = {}
+        return exposed_ports
+
     def build_host_config(self, binds):
+        network_mode = self.params.get('network_mode')
+        if network_mode is None:
+            network_mode = 'host'
         options = {
-            'network_mode': 'host',
+            'network_mode': network_mode,
             'ipc_mode': self.params.get('ipc_mode'),
             'cap_add': self.params.get('cap_add'),
             'security_opt': self.params.get('security_opt'),
@@ -679,6 +766,12 @@ class DockerWorker(object):
             'privileged': self.params.get('privileged'),
             'volumes_from': self.params.get('volumes_from')
         }
+
+        ports = self.params.get('ports')
+        if ports and network_mode != 'host':
+            port_bindings = self.generate_port_bindings(ports)
+            if port_bindings:
+                options['port_bindings'] = port_bindings
 
         dimensions = self.params.get('dimensions')
 
@@ -715,7 +808,7 @@ class DockerWorker(object):
 
     def build_container_options(self):
         volumes, binds = self.generate_volumes()
-        return {
+        options = {
             'command': self.params.get('command'),
             'detach': self.params.get('detach'),
             'environment': self._format_env_vars(),
@@ -726,6 +819,14 @@ class DockerWorker(object):
             'volumes': volumes,
             'tty': self.params.get('tty'),
         }
+
+        ports = self.params.get('ports')
+        network_mode = self.params.get('network_mode')
+        if ports and network_mode is not None and network_mode != 'host':
+            exposed_ports = self.generate_exposed_ports(ports)
+            if exposed_ports:
+                options['ports'] = exposed_ports
+        return options
 
     def create_container(self):
         self.changed = True
@@ -963,6 +1064,8 @@ def generate_module():
         volumes_from=dict(required=False, type='list'),
         dimensions=dict(required=False, type='dict', default=dict()),
         tty=dict(required=False, type='bool', default=False),
+        network_mode=dict(required=False, type='str', default=None),
+        ports=dict(required=False, type='list'),
         client_timeout=dict(required=False, type='int', default=120),
         ignore_missing=dict(required=False, type='bool', default=False),
     )
