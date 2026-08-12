@@ -45,6 +45,7 @@ options:
       - compare_container
       - compare_image
       - create_volume
+      - ensure_image
       - get_container_env
       - get_container_state
       - pull_image
@@ -55,6 +56,7 @@ options:
       - restart_container
       - start_container
       - stop_container
+      - stop_container_and_remove_container
   api_version:
     description:
       - The version of the api for docker-py to use when contacting docker
@@ -193,6 +195,12 @@ options:
     required: False
     default: False
     type: bool
+  client_timeout:
+    description:
+      - Docker client timeout in seconds
+    required: False
+    default: 120
+    type: int
 author: Sam Yaple
 '''
 
@@ -244,7 +252,8 @@ class DockerWorker(object):
         # tls_config = self.generate_tls()
 
         options = {
-            'version': self.params.get('api_version')
+            'version': self.params.get('api_version'),
+            'timeout': self.params.get('client_timeout'),
         }
 
         self.dc = get_docker_client()(**options)
@@ -314,19 +323,19 @@ class DockerWorker(object):
     def check_container_differs(self):
         container_info = self.get_container_info()
         return (
-            self.compare_cap_add(container_info) or
-            self.compare_security_opt(container_info) or
-            self.compare_image(container_info) or
-            self.compare_ipc_mode(container_info) or
-            self.compare_labels(container_info) or
-            self.compare_privileged(container_info) or
-            self.compare_pid_mode(container_info) or
-            self.compare_volumes(container_info) or
-            self.compare_volumes_from(container_info) or
-            self.compare_environment(container_info) or
-            self.compare_container_state(container_info) or
-            self.compare_dimensions(container_info) or
-            self.compare_command(container_info)
+                self.compare_cap_add(container_info) or
+                self.compare_security_opt(container_info) or
+                self.compare_image(container_info) or
+                self.compare_ipc_mode(container_info) or
+                self.compare_labels(container_info) or
+                self.compare_privileged(container_info) or
+                self.compare_pid_mode(container_info) or
+                self.compare_volumes(container_info) or
+                self.compare_volumes_from(container_info) or
+                self.compare_environment(container_info) or
+                self.compare_container_state(container_info) or
+                self.compare_dimensions(container_info) or
+                self.compare_command(container_info)
         )
 
     def compare_ipc_mode(self, container_info):
@@ -401,6 +410,8 @@ class DockerWorker(object):
         new_labels = self.params.get('labels')
         current_labels = container_info['Config'].get('Labels', dict())
         image_labels = self.check_image().get('Labels', dict())
+        if not image_labels:
+            image_labels = {}
         for k, v in image_labels.items():
             if k in new_labels:
                 if v != new_labels[k]:
@@ -477,7 +488,7 @@ class DockerWorker(object):
             'kernel_memory': 'KernelMemory', 'blkio_weight': 'BlkioWeight',
             'ulimits': 'Ulimits'}
         unsupported = set(new_dimensions.keys()) - \
-            set(dimension_map.keys())
+                      set(dimension_map.keys())
         if unsupported:
             self.module.exit_json(
                 failed=True, msg=repr("Unsupported dimensions"),
@@ -512,7 +523,8 @@ class DockerWorker(object):
 
     def compare_command(self, container_info):
         new_command = self.params.get('command')
-        if new_command is not None:
+
+        if new_command is not None and str(new_command).strip() != '':
             new_command_split = shlex.split(new_command)
             new_path = new_command_split[0]
             new_args = new_command_split[1:]
@@ -610,7 +622,7 @@ class DockerWorker(object):
             split_vol = vol.split(':')
 
             if (len(split_vol) == 2
-               and ('/' not in split_vol[0] or '/' in split_vol[1])):
+                    and ('/' not in split_vol[0] or '/' in split_vol[1])):
                 split_vol.append('rw')
 
             vol_list.append(split_vol[1])
@@ -733,6 +745,11 @@ class DockerWorker(object):
         # If config_strategy is COPY_ONCE or container's parameters are
         # changed, try to start a new one.
         if config_strategy == 'COPY_ONCE' or self.check_container_differs():
+            # NOTE(mgoddard): Pull the image if necessary before stopping the
+            # container, otherwise a failure to pull the image will leave the
+            # container stopped.
+            if not self.check_image():
+                self.pull_image()
             self.stop_container()
             self.remove_container()
             self.start_container()
@@ -812,11 +829,19 @@ class DockerWorker(object):
             graceful_timeout = 10
         container = self.check_container()
         if not container:
-            self.module.fail_json(
-                msg="No such container: {} to stop".format(name))
+            ignore_missing = self.params.get('ignore_missing')
+            if not ignore_missing:
+                self.module.fail_json(
+                    msg="No such container: {} to stop".format(name))
         elif not container['Status'].startswith('Exited '):
             self.changed = True
             self.dc.stop(name, timeout=graceful_timeout)
+
+    def stop_and_remove_container(self):
+        container = self.check_container()
+        if container:
+            self.stop_container()
+            self.remove_container()
 
     def restart_container(self):
         name = self.params.get('name')
@@ -872,6 +897,10 @@ class DockerWorker(object):
                     )
                 raise
 
+    def ensure_image(self):
+        if not self.check_image():
+            self.pull_image()
+
 
 def generate_module():
     # NOTE(jeffrey4l): add empty string '' to choices let us use
@@ -879,13 +908,21 @@ def generate_module():
     argument_spec = dict(
         common_options=dict(required=False, type='dict', default=dict()),
         action=dict(required=True, type='str',
-                    choices=['compare_container', 'compare_image',
-                             'create_volume', 'get_container_env',
-                             'get_container_state', 'pull_image',
+                    choices=['compare_container',
+                             'compare_image',
+                             'create_volume',
+                             'ensure_image',
+                             'get_container_env',
+                             'get_container_state',
+                             'pull_image',
                              'recreate_or_restart_container',
-                             'remove_container', 'remove_image',
-                             'remove_volume', 'restart_container',
-                             'start_container', 'stop_container']),
+                             'remove_container',
+                             'remove_image',
+                             'remove_volume',
+                             'restart_container',
+                             'start_container',
+                             'stop_container',
+                             'stop_and_remove_container']),
         api_version=dict(required=False, type='str', default='auto'),
         auth_email=dict(required=False, type='str'),
         auth_password=dict(required=False, type='str', no_log=True),
@@ -908,11 +945,11 @@ def generate_module():
         graceful_timeout=dict(required=False, type='int', default=10),
         remove_on_exit=dict(required=False, type='bool', default=True),
         restart_policy=dict(required=False, type='str', choices=[
-                            'no',
-                            'never',
-                            'on-failure',
-                            'always',
-                            'unless-stopped']),
+            'no',
+            'never',
+            'on-failure',
+            'always',
+            'unless-stopped']),
         restart_retries=dict(required=False, type='int', default=10),
         state=dict(required=False, type='str', default='running',
                    choices=['running',
@@ -926,6 +963,8 @@ def generate_module():
         volumes_from=dict(required=False, type='list'),
         dimensions=dict(required=False, type='dict', default=dict()),
         tty=dict(required=False, type='bool', default=False),
+        client_timeout=dict(required=False, type='int', default=120),
+        ignore_missing=dict(required=False, type='bool', default=False),
     )
     required_if = [
         ['action', 'pull_image', ['image']],
@@ -933,6 +972,7 @@ def generate_module():
         ['action', 'compare_container', ['name']],
         ['action', 'compare_image', ['name']],
         ['action', 'create_volume', ['name']],
+        ['action', 'ensure_image', ['image']],
         ['action', 'get_container_env', ['name']],
         ['action', 'get_container_state', ['name']],
         ['action', 'recreate_or_restart_container', ['name']],
@@ -940,7 +980,8 @@ def generate_module():
         ['action', 'remove_image', ['image']],
         ['action', 'remove_volume', ['name']],
         ['action', 'restart_container', ['name']],
-        ['action', 'stop_container', ['name']]
+        ['action', 'stop_container', ['name']],
+        ['action', 'stop_and_remove_container', ['name']],
     ]
     module = AnsibleModule(
         argument_spec=argument_spec,
