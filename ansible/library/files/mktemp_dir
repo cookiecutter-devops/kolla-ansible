@@ -1,0 +1,17 @@
+#!/bin/sh
+#
+# Very simple module that creates a temporary directory on the remote server
+# and returns its path.
+#
+out="$(mktemp -d 2>&1)"
+
+if [ $? -eq 0 ]; then
+	chmod 755 "$out"
+	cat <<-EOF
+		{ "changed": true, "path": "$out" }
+	EOF
+else
+	cat <<-EOF
+		{ "failed": true, "msg": "$out" }
+	EOF
+fi

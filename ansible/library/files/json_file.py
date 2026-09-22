@@ -1,23 +1,5 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-# (c) 2017, Pieter Lexis <pieter.lexis () powerdns.com>
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
-#
-# github: https://github.com/pieterlexis/ansible-json_file.git
 
 DOCUMENTATION = '''
 ---
@@ -80,122 +62,18 @@ author:
 '''
 
 EXAMPLES = '''
-
-# 作用类似于 ini_file,但操作对象是 JSON 文件。
-
-# 它可以对 JSON 文件中的指定键进行：
-
-# 新增配置；
-# 修改配置；
-# 删除配置；
-# 自动创建多级 JSON 对象；
-# 创建备份；
-# 支持 check_mode;
-# 支持文件权限、属主、属组、SELinux 等 Ansible 文件属性参数。
-
 # Ensure "foo: 'bar'" in specified file
 - json_file: dest=/etc/conf key=foo value=bar mode=0600 backup=yes
 
-# example
----
-- hosts: all
-  tasks:
-    - name: Generate starter files
-      copy:
-        dest: '/tmp/{{ item }}.json'
-        content: '{ "a": "b", "c": { "d": "e" } }'
-        force: no
-      with_sequence: start=0 end=10
-
-    - name: Change top-level value
-      json_file:
-        dest: '/tmp/0.json'
-        key: 'a'
-        value: 'e'
-
-    - name: Change top-level dict to a single value
-      json_file:
-        dest: '/tmp/0.json'
-        key: 'c'
-        value: 'f'
-
-    - name: Change second-level value
-      json_file:
-        dest: '/tmp/1.json'
-        key: 'c.d'
-        value: 'f'
-
-    - name: Add new key+value to second-level
-      json_file:
-        dest: '/tmp/2.json'
-        key: 'c.e'
-        value: 'f'
-
-    - name: Add new second-level key+value
-      json_file:
-        dest: '/tmp/3.json'
-        key: 'e.f'
-        value: 'g'
-
-    - name: Remove top-level key+value
-      json_file:
-        dest: '/tmp/4.json'
-        key: 'a'
-        state: absent
-
-    - name: Remove non-existing toplevel
-      json_file:
-        dest: '/tmp/5.json'
-        key: 'b'
-        state: absent
-
-    - name: Remove second-level key+value
-      json_file:
-        dest: '/tmp/6.json'
-        key: 'c.d'
-        state: absent
-
-    - name: Remove non-existing second-level
-      json_file:
-        dest: '/tmp/7.json'
-        key: 'c.e'
-        state: absent
-
-    - name: Add different types
-      json_file:
-        dest: '/tmp/8.json'
-        key: '{{ item.key }}'
-        value: '{{ item.value }}'
-      with_items:
-        - { 'key': 'integer', 'value': 25 }
-        - { 'key': 'bool1', 'value': true }
-        - { 'key': 'bool2', 'value': false }
-        - { 'key': 'should_be_null', 'value': None }
-
-    - name: Add dotted key-names
-      json_file:
-        dest: '/tmp/9.json'
-        key: '{{ item.key }}'
-        value: '{{ item.value }}'
-      with_items:
-        - { 'key': 'a\.b', 'value': 'bar' }
-        - { 'key': 'd.a\.b', 'value': 'buzz' }
-
-    - name: Add different types, as string
-      json_file:
-        dest: '/tmp/10.json'
-        key: '{{ item.key }}'
-        value: '{{ item.value }}'
-        as_string: yes
-      with_items:
-        - { 'key': 'integer', 'value': 25 }
-        - { 'key': 'bool1', 'value': true }
-        - { 'key': 'bool2', 'value': false }
-        - { 'key': 'should_be_null', 'value': None }
+# Remove the 'buzz' key that is in the 'foo' key
+- json_file: dest=/etc/anotherconf
+            key=foo.buzz
+            state=absent
 '''
 
 import os
 import re
+import json
 
 def _to_type(t):
     """ Returns `t` in the proper format, e.g. an int or a bool"""
@@ -328,6 +206,8 @@ def main():
     module.exit_json(**results)
 
 # import module snippets
-from ansible.module_utils.basic import *
+from ansible.module_utils.basic import * # noqa
+
+
 if __name__ == '__main__':
     main()

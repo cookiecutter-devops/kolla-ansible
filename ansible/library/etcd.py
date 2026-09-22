@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# github: https://github.com/jparrill/ansible-module-etcd.git
 from ansible.module_utils.basic import *
 
 DOCUMENTATION = """
