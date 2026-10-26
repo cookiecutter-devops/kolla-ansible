@@ -1,4 +1,15 @@
 #!/bin/bash
+## 运行kolla-ansible容器
+# docker run -d --name=kolla-ansible \
+#        --volume /etc/kolla:/etc/kolla \
+#        --volume /home/kolla-ansible:/home/kolla-ansible \
+#        --volume /root/.ssh:/root/.ssh \
+#        --network=host \
+#        --restart=always \
+#        kolla-ansible:latest \
+#        sleep \
+#        infinity
+
 CUR_DIR=$(dirname $(realpath $0))
 
 function main() {
@@ -8,7 +19,10 @@ function main() {
   ## clean original kolla-ansible dir
   rm -rf /home/kolla-ansible/*
 
-  ## copy action
+  # backup /home/kolla dir
+  cp -rf /etc/kolla /etc/kolla_$(date +%Y%m%d%H%M%S)
+
+  # copy action to /home/kolla-ansible dir
   cp -a $CUR_DIR/* /home/kolla-ansible/
 
   ## backup /etc/kolla dir
