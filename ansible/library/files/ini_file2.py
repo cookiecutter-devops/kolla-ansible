@@ -3,11 +3,8 @@
 
 """
 为了编辑 Windows INI 文件,Ansible 内置了一个 ini_file 模块。
-
 不幸的是，这个模块使用了 Python 的 ConfigParser 模块，每当你想更改一行内容时，它都会重新格式化整个 INI 文件。
-
 它还会删除所有注释行。对我来说，这是不可接受的。在寻找可能的解决方案后，我决定改进 ini_file 模块，并创建了 ini_file2。
-
 请参阅以下内容来改进 Ansible 的 ini_file 模块：
 """
 
