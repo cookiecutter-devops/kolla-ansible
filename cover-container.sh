@@ -23,7 +23,10 @@ function main() {
   cp -rf /etc/kolla /etc/kolla_$(date +%Y%m%d%H%M%S)
 
   # copy action to /home/kolla-ansible dir
+  find $CUR_DIR/ -type f -exec dos2unix {} \;
   cp -a $CUR_DIR/* /home/kolla-ansible/
+
+
 
   ## backup /etc/kolla dir
   if [[ "$refresh" == "refreshetc" ]]; then
