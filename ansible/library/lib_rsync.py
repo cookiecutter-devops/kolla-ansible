@@ -337,10 +337,7 @@ class LibRsync:
                 cmd.extend(['-i', self.private_key])
 
             if not self.ssh_strict_hostkey_checking:
-                cmd.extend([
-                    '-o', 'StrictHostKeyChecking=no',
-                    '-o', 'UserKnownHostsFile=/dev/null',
-                ])
+                cmd.extend([ '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null', ])
         return ' '.join(cmd)
 
     def build_rsync_base(self):
